@@ -30,7 +30,9 @@ def create_consumer() -> KafkaConsumer:
                 group_id="optimizer",
                 enable_auto_commit=True,
                 auto_offset_reset="latest",
-                request_timeout_ms=5000,
+                # Ensure request timeout is larger than session timeout to satisfy Kafka client validation
+                session_timeout_ms=10000,
+                request_timeout_ms=30000,
                 api_version_auto_timeout_ms=5000,
                 retry_backoff_ms=500,
             )

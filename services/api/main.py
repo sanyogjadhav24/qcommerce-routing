@@ -163,6 +163,116 @@ def create_demo_route():
     return {"status": "ok", "batch_id": "demo"}
 
 
+@app.post("/routes/demoA")
+def create_demo_a():
+    # Pre-baked demo A (central/east pickups; south/west drops)
+    pairs = [
+        ((12.9733, 77.6110), (12.9250, 77.5938)),
+        ((12.9786, 77.6400), (12.9420, 77.5710)),
+        ((12.9350, 77.6240), (13.0040, 77.5690)),
+    ]
+    naive_seq = []
+    pickups = []
+    drops = []
+    for p, d in pairs:
+        naive_seq.extend([p, d])
+        pickups.append(p)
+        drops.append(d)
+    # Simple "optimized" heuristic for demo: visit all pickups first (nearest-neighbour), then drops
+    def nn(order):
+        if not order:
+            return []
+        seq = [order[0]]
+        remaining = order[1:]
+        while remaining:
+            last = seq[-1]
+            remaining.sort(key=lambda x: (x[0]-last[0])**2 + (x[1]-last[1])**2)
+            seq.append(remaining.pop(0))
+        return seq
+    opt_pickups = nn(pickups)
+    # map pickup order to corresponding drops
+    pickup_to_drop = {p: d for p, d in pairs}
+    opt_drops = [pickup_to_drop[p] for p in opt_pickups]
+    optimized_seq = opt_pickups + opt_drops
+    geometry = _encode_polyline(optimized_seq)
+    naive_geometry = _encode_polyline(naive_seq)
+    payload = {
+        "batch_id": "demoA",
+        "created_at": int(time.time()),
+        "num_orders": 3,
+        "route": {
+            "distance_m": None,
+            "duration_s": None,
+            "geometry": geometry,
+            "fallback": True,
+            "stops": optimized_seq,
+            "naive_geometry": naive_geometry,
+        },
+        "orders": [],
+        "coords": optimized_seq,
+    }
+    redis_client.set("routes:demoA", json.dumps(payload))
+    redis_client.set("routes:latest", "demoA")
+    return {"status": "ok", "batch_id": "demoA"}
+
+
+@app.post("/routes/demoB")
+def create_demo_b():
+    # Pre-baked demo B (north/east pickups; south/west drops)
+    pairs = [
+        ((12.9835, 77.6033), (12.9089, 77.5851)),
+        ((12.9537, 77.6682), (12.9980, 77.5530)),
+        ((12.9605, 77.6388), (12.9181, 77.5732)),
+    ]
+    naive_seq = []
+    pickups = []
+    drops = []
+    for p, d in pairs:
+        naive_seq.extend([p, d])
+        pickups.append(p)
+        drops.append(d)
+    def nn(order):
+        if not order:
+            return []
+        seq = [order[0]]
+        remaining = order[1:]
+        while remaining:
+            last = seq[-1]
+            remaining.sort(key=lambda x: (x[0]-last[0])**2 + (x[1]-last[1])**2)
+            seq.append(remaining.pop(0))
+        return seq
+    opt_pickups = nn(pickups)
+    pickup_to_drop = {p: d for p, d in pairs}
+    opt_drops = [pickup_to_drop[p] for p in opt_pickups]
+    optimized_seq = opt_pickups + opt_drops
+    geometry = _encode_polyline(optimized_seq)
+    naive_geometry = _encode_polyline(naive_seq)
+    payload = {
+        "batch_id": "demoB",
+        "created_at": int(time.time()),
+        "num_orders": 3,
+        "route": {
+            "distance_m": None,
+            "duration_s": None,
+            "geometry": geometry,
+            "fallback": True,
+            "stops": optimized_seq,
+            "naive_geometry": naive_geometry,
+        },
+        "orders": [],
+        "coords": optimized_seq,
+    }
+    redis_client.set("routes:demoB", json.dumps(payload))
+    redis_client.set("routes:latest", "demoB")
+    return {"status": "ok", "batch_id": "demoB"}
+
+
+@app.post("/routes/clear")
+def clear_latest():
+    redis_client.delete("routes:latest")
+    return {"status": "cleared"}
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     # Minimal page to visualize latest route using Leaflet
@@ -177,6 +287,15 @@ def dashboard():
   <style>
     html, body, #map { height: 100%; margin: 0; }
     .panel { position: absolute; top: 10px; left: 10px; z-index: 999; background: white; padding: 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
+    .toolbar { position: absolute; top: 10px; right: 10px; z-index: 999; background: white; padding: 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); display: flex; gap: 6px; }
+    .toolbar button { padding: 6px 10px; border: 1px solid #ddd; background: #f8f9fa; border-radius: 4px; cursor: pointer; }
+    .legend { position: absolute; bottom: 10px; left: 10px; z-index: 999; background: white; padding: 8px; border-radius: 6px; box-shadow: 0 2px 6px rgba(0,0,0,0.2); font-size: 12px; }
+    .legend .item { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+    .chip { width: 18px; height: 4px; }
+    .chip.red { background: #ff3333; }
+    .chip.blue { background: #60a5fa; border-top: 2px dashed #60a5fa; height: 0; }
+    .chip.green { background: #1a7f37; height: 8px; border-radius: 10px; }
+    .chip.end { background: #b91c1c; height: 8px; border-radius: 10px; }
   </style>
   <script src=\"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js\"></script>
   <script>
@@ -271,6 +390,17 @@ def dashboard():
 </head>
 <body>
   <div class=\"panel\"><span id=\"info\">Waiting for route...</span></div>
+  <div class=\"toolbar\">
+    <button onclick=\"fetch('/routes/demo',{method:'POST'}).then(()=>location.reload())\">Demo</button>
+    <button onclick=\"fetch('/routes/demoA',{method:'POST'}).then(()=>location.reload())\">Demo A</button>
+    <button onclick=\"fetch('/routes/demoB',{method:'POST'}).then(()=>location.reload())\">Demo B</button>
+  </div>
+  <div class=\"legend\">
+    <div class=\"item\"><span class=\"chip red\"></span> Optimized route</div>
+    <div class=\"item\"><span class=\"chip blue\"></span> Naive route</div>
+    <div class=\"item\"><span class=\"chip green\"></span> Source</div>
+    <div class=\"item\"><span class=\"chip end\"></span> Destination</div>
+  </div>
   <div id=\"map\"></div>
 </body>
 </html>
