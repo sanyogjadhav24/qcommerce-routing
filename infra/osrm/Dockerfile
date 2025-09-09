@@ -1,7 +1,5 @@
 FROM osrm/osrm-backend:latest
 
-RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /data
 
 COPY run.sh /usr/local/bin/osrm-build
