@@ -117,6 +117,14 @@ def build_route(orders: list[dict]) -> dict:
         # origin/dest are (lat, lon)
         return predictor.predict_seconds(origin, dest, datetime.utcnow())
 
+    # Build naive sequence (pickup1 -> drop1 -> pickup2 -> drop2 ...)
+    naive_seq: list[tuple[float, float]] = []
+    for o in orders:
+        p_lat, p_lon = o["pickup"]
+        d_lat, d_lon = o["drop"]
+        naive_seq.extend([(p_lat, p_lon), (d_lat, d_lon)])
+    naive_geometry = encode_polyline(naive_seq) if naive_seq else None
+
     result = solver.solve(orders, predict_seconds)
     if result.get("status") != "ok" or not result.get("nodes"):
         # fallback to naive OSRM trip logic
@@ -142,6 +150,7 @@ def build_route(orders: list[dict]) -> dict:
                     "duration_s": trip.get("duration"),
                     "geometry": trip.get("geometry"),
                     "stops": seq_latlon,
+                    "naive_geometry": naive_geometry,
                 }
         except Exception:
             pass
@@ -165,6 +174,7 @@ def build_route(orders: list[dict]) -> dict:
             "geometry": geometry,
             "fallback": True,
             "stops": latlng_seq,
+            "naive_geometry": naive_geometry if naive_geometry else geometry,
         }
 
     # Build ordered coordinate list from nodes result and query OSRM for polyline
@@ -194,6 +204,7 @@ def build_route(orders: list[dict]) -> dict:
                 "duration_s": route.get("duration"),
                 "geometry": route.get("geometry"),
                 "stops": seq_latlon,
+                "naive_geometry": naive_geometry,
             }
     except Exception:
         pass
@@ -210,15 +221,23 @@ def build_route(orders: list[dict]) -> dict:
         "geometry": geometry,
         "fallback": True,
         "stops": seq_latlon,
+        "naive_geometry": naive_geometry if naive_geometry else geometry,
     }
 
 
 for msg in consumer:
     order = msg.value
-    print(f"New order received: {order['order_id']}", flush=True)
-    # Skip canceled orders
-    if r.get(f"orders:cancelled:{order['order_id']}"):
+    # Control messages
+    if isinstance(order, dict) and order.get("_control") == "flush":
+        print("Flush control received", flush=True)
+        flush_batch_if_needed(force=True)
+        continue
+    # Normal order
+    print(f"New order received: {order.get('order_id','unknown')}", flush=True)
+    if 'order_id' in order and r.get(f"orders:cancelled:{order['order_id']}"):
         print(f"Order {order['order_id']} is cancelled. Skipping.", flush=True)
         continue
     batch.append(order)
-    flush_batch_if_needed(force=True)
+    # Only auto-flush immediately if not deferred
+    if not order.get('_defer'):
+        flush_batch_if_needed(force=True)

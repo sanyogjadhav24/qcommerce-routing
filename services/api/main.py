@@ -52,6 +52,9 @@ class Order(BaseModel):
     latest: datetime
     volume: float
 
+class OrderBatch(BaseModel):
+    orders: list[Order]
+
 @app.post("/orders")
 async def create_order(order: Order):
     order_id = str(uuid.uuid4())
@@ -65,6 +68,25 @@ async def create_order(order: Order):
     }
     get_producer().send("orders", payload)
     return {"status": "queued", "order_id": order_id}
+
+
+@app.post("/orders/batch")
+async def create_orders_batch(batch: OrderBatch):
+    # Send all orders with deferral hint, then a flush control to build one combined route
+    for o in batch.orders:
+        payload = {
+            "order_id": str(uuid.uuid4()),
+            "pickup": [o.pickup_lat, o.pickup_lon],
+            "drop": [o.drop_lat, o.drop_lon],
+            "earliest": o.earliest.isoformat(),
+            "latest": o.latest.isoformat(),
+            "volume": o.volume,
+            "_defer": True,
+        }
+        get_producer().send("orders", payload)
+    # control message to trigger immediate flush
+    get_producer().send("orders", {"_control": "flush"})
+    return {"status": "queued", "count": len(batch.orders)}
 
 
 @app.delete("/orders/{order_id}")
@@ -131,6 +153,7 @@ def create_demo_route():
             "geometry": geometry,
             "fallback": True,
             "stops": points,
+            "naive_geometry": geometry
         },
         "orders": [],
         "coords": points,
@@ -172,15 +195,16 @@ def dashboard():
         const data = await fetchLatest();
         if (data && data.route && data.route.geometry) {
           if (window.routeLayer) { map.removeLayer(window.routeLayer); }
+          if (window.naiveLayer) { map.removeLayer(window.naiveLayer); }
           const coords = L.Polyline.decode(data.route.geometry);
           window.routeLayer = L.polyline(coords, { color: '#ff3333', weight: 4 });
           window.routeLayer.addTo(map);
-          // Add start/end markers for clarity
+          // Add source/destination markers
           if (coords.length > 0) {
             if (window.startMarker) { map.removeLayer(window.startMarker); }
             if (window.endMarker) { map.removeLayer(window.endMarker); }
-            window.startMarker = L.marker(coords[0]).addTo(map);
-            window.endMarker = L.marker(coords[coords.length - 1]).addTo(map);
+            window.startMarker = L.circleMarker(coords[0], { radius: 7, color: '#1a7f37', fillColor: '#1a7f37', fillOpacity: 0.9 }).addTo(map).bindTooltip('Source');
+            window.endMarker = L.circleMarker(coords[coords.length - 1], { radius: 7, color: '#b91c1c', fillColor: '#b91c1c', fillOpacity: 0.9 }).addTo(map).bindTooltip('Destination');
           }
           // Render stops: prefer route.stops; fallback to orders' pickup/drop or demo coords
           if (window.stopMarkers) { window.stopMarkers.forEach(m => map.removeLayer(m)); }
@@ -202,6 +226,15 @@ def dashboard():
               window.stopMarkers.push(m);
             } catch (e) { /* ignore bad point */ }
           });
+          // Draw a naive path from encoded geometry if present
+          try {
+            if (data.route.naive_geometry) {
+              const naive = L.Polyline.decode(data.route.naive_geometry);
+              // Softer but more visible than grey, still secondary to main red route
+              window.naiveLayer = L.polyline(naive, { color: '#60a5fa', weight: 3, opacity: 0.6, dashArray: '6,6' }).addTo(map);
+            }
+          } catch (e) {}
+
           map.fitBounds(window.routeLayer.getBounds(), { padding: [20, 20] });
           document.getElementById('info').innerText = `Orders: ${data.num_orders} | Dist: ${(data.route.distance_m/1000).toFixed(2)} km | Dur: ${(data.route.duration_s/60).toFixed(1)} min`;
         }
