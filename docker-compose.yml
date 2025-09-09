@@ -1,0 +1,98 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./services/api/Dockerfile
+    container_name: qcommerce-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - kafka
+    environment:
+      - REDIS_HOST=redis
+      - KAFKA_BROKER=kafka:9092
+    networks:
+      - qnet
+
+  optimizer:
+    build:
+      context: .
+      dockerfile: ./services/optimizer/Dockerfile
+    container_name: qcommerce-optimizer
+    depends_on:
+      - redis
+      - kafka
+      - osrm
+    environment:
+      - REDIS_HOST=redis
+      - KAFKA_BROKER=kafka:9092
+      - OSRM_BASE_URL=https://router.project-osrm.org
+    networks:
+      - qnet
+
+  redis:
+    image: redis:7
+    container_name: qcommerce-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - qnet
+
+  kafka:
+    image: bitnami/kafka:3.6.0
+    container_name: qcommerce-kafka
+    environment:
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=true
+      - ALLOW_PLAINTEXT_LISTENER=yes
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    networks:
+      - qnet
+
+  zookeeper:
+    image: bitnami/zookeeper:3.9.0
+    container_name: qcommerce-zookeeper
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+    ports:
+      - "2181:2181"
+    networks:
+      - qnet
+
+  osrm:
+    build:
+      context: ./infra/osrm
+      dockerfile: Dockerfile
+    container_name: qcommerce-osrm
+    volumes:
+      - ./infra/osrm:/data
+      - ./infra/osrm/run.sh:/usr/local/bin/osrm-build:ro
+    ports:
+      - "5000:5000"
+    command: bash -lc "osrm-build && osrm-routed --algorithm mld /data/monaco-latest.osrm"
+    networks:
+      - qnet
+
+  postgres:
+    image: postgis/postgis:15-3.4
+    container_name: qcommerce-postgres
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin
+      - POSTGRES_DB=qcommerce
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/sql:/docker-entrypoint-initdb.d
+    networks:
+      - qnet
+
+networks:
+  qnet:
+    driver: bridge

@@ -1,0 +1,13 @@
+fastapi[all]==0.95.0
+uvicorn==0.22.0
+ortools==9.14.6206
+lightgbm==4.6.0
+pandas==2.2.0
+numpy==1.26.4
+scikit-learn==1.4.2
+psycopg2-binary==2.9.10
+redis==4.6.0
+joblib==1.4.2
+haversine==2.8.1
+kafka-python==2.0.2
+requests==2.31.0
