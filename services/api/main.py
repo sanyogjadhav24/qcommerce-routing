@@ -66,6 +66,13 @@ async def create_order(order: Order):
     get_producer().send("orders", payload)
     return {"status": "queued", "order_id": order_id}
 
+
+@app.delete("/orders/{order_id}")
+def cancel_order(order_id: str):
+    # Mark order as canceled so optimizer can skip it
+    redis_client.set(f"orders:cancelled:{order_id}", "1", ex=24*3600)
+    return {"status": "cancelled", "order_id": order_id}
+
 @app.get("/")
 def root():
     return {"message": "Q-Commerce Routing API running"}
@@ -123,6 +130,7 @@ def create_demo_route():
             "duration_s": 1200.0,
             "geometry": geometry,
             "fallback": True,
+            "stops": points,
         },
         "orders": [],
         "coords": points,
@@ -174,6 +182,26 @@ def dashboard():
             window.startMarker = L.marker(coords[0]).addTo(map);
             window.endMarker = L.marker(coords[coords.length - 1]).addTo(map);
           }
+          // Render stops: prefer route.stops; fallback to orders' pickup/drop or demo coords
+          if (window.stopMarkers) { window.stopMarkers.forEach(m => map.removeLayer(m)); }
+          window.stopMarkers = [];
+          let stops = [];
+          if (data.route.stops && Array.isArray(data.route.stops) && data.route.stops.length > 0) {
+            stops = data.route.stops;
+          } else if (Array.isArray(data.orders) && data.orders.length > 0) {
+            data.orders.forEach(o => {
+              if (Array.isArray(o.pickup) && o.pickup.length === 2) stops.push(o.pickup);
+              if (Array.isArray(o.drop) && o.drop.length === 2) stops.push(o.drop);
+            });
+          } else if (Array.isArray(data.coords) && data.coords.length > 0) {
+            stops = data.coords;
+          }
+          stops.forEach((pt, idx) => {
+            try {
+              const m = L.marker(pt, { title: `Stop ${idx + 1}` }).addTo(map);
+              window.stopMarkers.push(m);
+            } catch (e) { /* ignore bad point */ }
+          });
           map.fitBounds(window.routeLayer.getBounds(), { padding: [20, 20] });
           document.getElementById('info').innerText = `Orders: ${data.num_orders} | Dist: ${(data.route.distance_m/1000).toFixed(2)} km | Dur: ${(data.route.duration_s/60).toFixed(1)} min`;
         }
