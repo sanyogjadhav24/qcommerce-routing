@@ -304,6 +304,25 @@ def dashboard():
       return await res.json();
     }
 
+    function haversineKm(a, b) {
+      const toRad = d => d * Math.PI / 180;
+      const R = 6371; // km
+      const dLat = toRad(b[0] - a[0]);
+      const dLon = toRad(b[1] - a[1]);
+      const lat1 = toRad(a[0]);
+      const lat2 = toRad(b[0]);
+      const s = Math.sin(dLat/2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon/2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(s));
+    }
+
+    function computeDistanceKm(coords) {
+      let km = 0;
+      for (let i = 1; i < coords.length; i++) {
+        km += haversineKm(coords[i - 1], coords[i]);
+      }
+      return km;
+    }
+
     async function init() {
       const map = L.map('map').setView([12.9716, 77.5946], 12);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -355,7 +374,12 @@ def dashboard():
           } catch (e) {}
 
           map.fitBounds(window.routeLayer.getBounds(), { padding: [20, 20] });
-          document.getElementById('info').innerText = `Orders: ${data.num_orders} | Dist: ${(data.route.distance_m/1000).toFixed(2)} km | Dur: ${(data.route.duration_s/60).toFixed(1)} min`;
+          const hasDist = Number.isFinite(data.route.distance_m);
+          const hasDur = Number.isFinite(data.route.duration_s);
+          let distKm = hasDist ? (data.route.distance_m / 1000) : computeDistanceKm(coords);
+          // fallback speed 25 km/h if duration missing
+          let durMin = hasDur ? (data.route.duration_s / 60) : (distKm / 25) * 60;
+          document.getElementById('info').innerText = `Orders: ${data.num_orders} | Dist: ${distKm.toFixed(2)} km | Dur: ${durMin.toFixed(1)} min`;
         }
       }
 
